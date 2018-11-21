@@ -23,66 +23,41 @@ data Com = Assign String Exp
 
 type Location = Int
 type Index = [ String ]
-type Stack = [(String,Int)]
+type Stack = [Int]
 type Code = [Op]
 
 data Op = PUSH Int | ADD | SUB | MULT | DIV
           deriving Show
 
-initStack::[(String,Int)] -> Stack
+initStack::[Int] -> Stack
 initStack s = s
 
-getStringStack :: Stack -> String
-getStringStack ((str,val):xs) = str
+initIndex::[String] -> Index
+initIndex i = i
 
-
-getIntStack :: Stack -> Int
-getIntStack ((str,val):xs) = val
-
-stackUse = initStack [];
+stackUse = initStack []
+indexUse = initIndex []
 
 newtype M a = StOut (Stack -> (a, Stack, String))
-newtype N a = St (Stack -> (a, Stack))
---StOut (\x-> (1,(initStack x),""))
+
 unStOut (StOut f) = f
 
-exec :: Code -> Stack -> Stack
-exec []           s           = s
-exec (PUSH n : c) s           = exec c (("int",n) : s)
-exec (ADD : c)    ((w1,m) : (w2,n) : s) = exec c ((w1,n+m) : s)
-exec (SUB : c)    ((w1,m) : (w2,n) : s) = exec c ((w1,n-m) : s)
-exec (MULT : c)    ((w1,m) : (w2,n) : s) = exec c ((w1,n*m) : s)
-exec (DIV : c)    ((w1,m) : (w2,n) : s) = exec c ((w1,(div n m)) : s)
+exec1 :: Code -> Stack -> Stack
+exec1 []           s           = s
+exec1 (PUSH n : c) s           = exec c (n : s)
+exec1 (ADD : c)    (m : n : s) = exec c ((n+m) : s)
+exec1 (SUB : c)    (m : n : s) = exec c ((n-m) : s)
+exec1 (MULT : c)    (m : n : s) = exec c ((n*m) : s)
+exec1 (DIV : c)    (m : n : s) = exec c ((div n m) : s)
 
 compute :: M a -> Stack -> (a,Stack,String)
-compute (StOut st) s = st s --(1,s,"String")
+compute (StOut st) s = st s
 
 item :: Int -> M Int
 item n = StOut (\st -> case st of 
 	[] -> (0,[],"")
-	((s,n):xs) -> (n,xs,s))
+	(x:xs) -> (n,x:xs,head indexUse))
 
-parse :: N a -> Stack -> (a, Stack)
-parse (St s) inp = s inp
-{-
-app :: N a -> Stack-> (a, Stack)
-app (StOut st) x = (unStOut st) x
-
-dn :: Stack -> (a,Stack)
-dn s = (StOut,s,"")
-
-calcule :: Stack -> Code-> (a,Stack)
-calcule s1@((w,n):(w1,n1):xs) cd@(y:ys) = (cd, exec cd s1)
-
-compute :: M a -> Stack -> (a,Stack,String)
-compute (StOut st) s = (unStOut st) s
-
-transf ::Num a => (a,Stack,String) -> (a,Stack,String)
-transf (c,stk,str) = (getIntStack stk, stk, getStringStack stk)
--}
-instance Functor N where
-    fmap f s = St (\ra -> case parse s ra of
-        (v,out) -> (f v, out))
 
 instance Functor M where
 	 fmap f m@(StOut st) = StOut (\x-> case compute m x of
@@ -99,10 +74,6 @@ instance Monad M where
 	                                      (StOut resF) = f v
 	                                      in resF newS )
 
-{-										
-instance Show M () where
-	showsPrec n (StOut st) = showsPrec n st
--}
 
 --A posição é um inteiro
 position :: String -> Index -> Location
@@ -116,13 +87,13 @@ fetch l ((s,v) : vs ) = if l == 1 then v else fetch (l-1) vs
 {- Uma função para computar um ambiente atualizado. Obtém-se
 uma nova pilha baseada no número da posição atualizada, do valor
 armazenado e do conteúdo anterior da pilha.-}
-aux :: Location -> Int -> Int -> Stack -> Stack
-aux l a n s@(x:xs)
- | (l>a) = [x] ++ aux (l) (a+1) (n) (xs)
- | otherwise = [x] ++ [("",n)] ++ xs
+auxPut :: Location -> Int -> Int -> Stack -> Stack
+auxPut l a n s@(x:xs)
+ | (l>a) = [x] ++ auxPut (l) (a+1) (n) (xs)
+ | otherwise = [x] ++ [n] ++ xs
 
 put :: Location -> Int -> Stack -> Stack
-put l n s@(x:xs) = aux l 0 n s
+put l n s@(x:xs) = auxPut l 0 n s
 
 
 {- para retornar o valor de um ambiente como principal resultado de
@@ -131,15 +102,14 @@ getfrom :: Location -> Stack -> M Int
 getfrom l = (\s-> item (fetch l s)) 
 
 -- para modificação da pilha
--- write :: Location -> Int -> M ()
+write :: Location -> Int -> M ()
+write l n = (\s -> (n, put l n s, head indexUse) ) useStack
 
 {- para modificar a pilha, sem modificação do índice, para colocar
 um valor no topo da pilha. Pode ser útil ao declarar uma variável,
-por exemplo. 
+por exemplo. -}
 push :: Int -> M ()
-push n = [n] ++ stack >>= return 
--}
-
+push n = StOut (\s-> (n,(n:s),head indexUse)) useStack
 
 
 {-Escrever a expressão de avaliação que, dada uma expressão e uma tabela
@@ -161,18 +131,20 @@ eval1 exp index = case exp of
 {-• Escrever a função para execução de comandos que recebe como argumento
 um comando e uma tabela (índice), retornando um valor monádico
 com unit (tupla vazia) como resultado.
-
-exec :: Com −> Index −>M( )
-exec stmt index = case stmt of
-Assign name e −> let loc = position name index in do { v <−eval1 e index;
-write loc v }
-(Seq com1 com2) -> let loc = position name index in do { v <-eval1 e index; }
-(Cond exp com1 com2) -> let loc = position name index in do { v <-eval1 e index; }
-(While exp com) -> let loc = position name index in do { v <-eval1 e index; }
-(Declare String Exp Com) -> let loc = position name index in do { v <-eval1 e index; }
-(Print exp) -> let loc = position name index in do { v <-eval1 exp index; Print v }
-
 -}
+
+exec :: Com -> Index -> M( )
+exec stmt idx = case stmt of
+Assign name e = let loc = position name idx in do { v <- eval1 e idx;
+write loc v }
+(Seq com1S com2S) = {-let loc = position name idx in-} do { exec com1S idx; exec com2S idx}
+(Cond expC com1C com2C) = let loc = position name idx in do { v <- eval1 expC idx; 
+if v==1 then exec com1C idx else exec com2C idx  }
+(While expW comW) = let loc = position name idx in do { v <-eval1 expW idx; 
+if v == 1 then exec comW idx >>= exec stmt idx; else return $ ()  }
+(Declare string expD ComD) = let loc = position name idx in do { v <-eval1 expD idx; write  }
+(Print expP) = let loc = position name idx in do { v <- eval1 expP idx; Print v }
+
 
 cmp:: Exp -> Exp -> (Int -> Int -> Bool) -> Index-> M Int
 cmp a1 a2 f i = do
@@ -197,41 +169,3 @@ arOpExp a1 a2 f i = do
   r1 <- eval1 a1 i
   r2 <- eval1 a2 i
   arOp r1 r2 f
-{-
-incdec :: Exp -> (Int->Int) -> M Int
-incdec x f = do
-  loc <- evalLoc x
-  v <- readL loc
-  case v of
-    i ->
-     let res =  (f i)
-     in do
-       writeL (loc, res)
-       return res
-
-incdec :: Exp -> (Int->Int) -> M Int
-incdec x f = do
-	 loc <- evalLoc x
-	 v <- readL loc
-	 case v of
-	   i ->
-		let res =  (f i)
-		in do
-		  writeL (loc, res)
-		  return res
-	  _ -> lift $ throwError "Wrong type"
-   
-   
-assignOp :: Int -> Int -> Assignment_op -> M Int
-assignOp val1 val2 op =
-	 case op of
-	  Assign  -> return val2
-	  AssignMul  -> arOp val1 val2 (*)
-	  AssignDiv  -> arOp val1 val2 (div)
-	  AssignMod  -> arOp val1 val2 (mod)
-	  AssignAdd  -> arOp val1 val2 (+)
-	  AssignSub  -> arOp val1 val2 (-)
-   
-expTrue :: Exp
-expTrue = Econst (Ebool CTrue)
--}
